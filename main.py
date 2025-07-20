@@ -456,22 +456,57 @@ class EmployeeDetailDialog(QDialog):
             if dlg.exec_() == QDialog.Accepted:
                 date, amount, description = dlg.get_advance_data()
                 if amount > 0:
-                    # Validate that the advance date matches the current month being viewed
-                    current_year = QDate.currentDate().year()
-                    if date.month() != month or date.year() != current_year:
-                        QMessageBox.warning(self, "Geçersiz Tarih", 
-                                          f"Avans tarihi {month}. ay {current_year} ile eşleşmelidir!")
-                        return
-                    
                     try:
                         cursor = conn.cursor()
-                        cursor.execute(
-                            "INSERT INTO advances (employee_id, date, amount, description) VALUES (?, ?, ?, ?)",
-                            (self.employee.id, date.toString("yyyy-MM-dd"), amount, description)
-                        )
+                        remaining_payment = amount
+                        allocations = []
+                        
+                        # Check for previous month's remaining salary
+                        previous_month_remaining = self.calculate_previous_month_remaining(month)
+                        
+                        # First, allocate to previous month if there's remaining salary
+                        if previous_month_remaining > 0:
+                            amount_for_previous = min(remaining_payment, previous_month_remaining)
+                            if month == 1:
+                                previous_month = 12
+                                previous_year = QDate.currentDate().year() - 1
+                            else:
+                                previous_month = month - 1
+                                previous_year = QDate.currentDate().year()
+                            
+                            # Create a separate advance record for previous month
+                            # Use a date from the previous month for proper allocation
+                            previous_month_date = QDate(previous_year, previous_month, 1)
+                            cursor.execute(
+                                "INSERT INTO advances (employee_id, date, amount, description) VALUES (?, ?, ?, ?)",
+                                (self.employee.id, previous_month_date.toString("yyyy-MM-dd"), amount_for_previous, 
+                                 f"{description} (Gecikmiş ödeme - {previous_month}. ay kalan maaş)")
+                            )
+                            allocations.append(f"Önceki ay ({previous_month}. ay) kalan maaş: {amount_for_previous:.2f} TL")
+                            remaining_payment -= amount_for_previous
+                        
+                        # Then, allocate to current month
+                        if remaining_payment > 0:
+                            cursor.execute(
+                                "INSERT INTO advances (employee_id, date, amount, description) VALUES (?, ?, ?, ?)",
+                                (self.employee.id, date.toString("yyyy-MM-dd"), remaining_payment, 
+                                 f"{description} ({month}. ay maaş)")
+                            )
+                            allocations.append(f"{month}. ay maaş: {remaining_payment:.2f} TL")
+                        
                         conn.commit()
                         self.refresh_all_tabs()
-                        QMessageBox.information(self, "Başarılı", "Avans başarıyla eklendi!")
+                        
+                        # Show success message with breakdown
+                        if len(allocations) > 1:
+                            breakdown_text = "\n".join(allocations)
+                            QMessageBox.information(self, "Başarılı", 
+                                                  f"Toplam {amount:.2f} TL ödeme başarıyla yapıldı!\n\n"
+                                                  f"Dağılım:\n{breakdown_text}\n\n"
+                                                  f"Not: Önceki ay kalan maaş ödendi ve kalan maaş 0'a düşürüldü.")
+                        else:
+                            QMessageBox.information(self, "Başarılı", "Avans başarıyla eklendi!")
+                            
                     except sqlite3.Error as e:
                         QMessageBox.critical(self, "Veritabanı Hatası", 
                                            f"Avans eklenirken hata oluştu:\n{str(e)}")
@@ -652,6 +687,38 @@ class EmployeeDetailDialog(QDialog):
             self.tabs.insertTab(index, self.create_month_tab(month), f"{month}. Ay")
             self.tabs.setCurrentIndex(index)
     
+    def calculate_previous_month_remaining(self, current_month):
+        """Calculate remaining salary from the previous month"""
+        if current_month == 1:
+            # January - check December of previous year
+            previous_month = 12
+            previous_year = QDate.currentDate().year() - 1
+        else:
+            # Other months - check previous month of current year
+            previous_month = current_month - 1
+            previous_year = QDate.currentDate().year()
+        
+        # Check if employee was working in the previous month
+        if previous_year < self.employee.start_date.year():
+            return 0
+        if previous_year == self.employee.start_date.year() and previous_month < self.employee.start_date.month():
+            return 0
+        
+        # Calculate remaining salary for previous month
+        if previous_month == self.employee.start_date.month() and previous_year == self.employee.start_date.year():
+            # Start month - use prorated salary
+            days_in_month = QDate(previous_year, previous_month, 1).daysInMonth()
+            proportion = (days_in_month - self.employee.start_date.day() + 1) / days_in_month
+            month_salary = self.employee.get_salary_for_month(previous_month, previous_year) * proportion
+        else:
+            # Regular month - use full salary
+            month_salary = self.employee.get_salary_for_month(previous_month, previous_year)
+        
+        advances = self.employee.total_advances_for_month(previous_month, previous_year)
+        remaining = month_salary - advances
+        
+        return max(0, remaining)
+
     def refresh_all_tabs(self):
         """Refresh all tabs to update kalan maaş calculations"""
         current_index = self.tabs.currentIndex()
