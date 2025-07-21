@@ -690,8 +690,13 @@ class EmployeeDetailDialog(QDialog):
             total_salary = 0
             breakdown = []
             start_day = start.day()
+            max_periods = 100
+            period_count = 0
             # 1. Full periods: from start_day to (start_day-1) of next month
             while True:
+                if period_count > max_periods:
+                    QMessageBox.critical(self, "Hak Ediş Hatası", "Çok fazla dönem tespit edildi. Tarih girişinizi kontrol edin veya geliştiriciye başvurun.")
+                    return
                 # Calculate period_end
                 next_month = period_start.month() + 1
                 next_year = period_start.year()
@@ -702,7 +707,6 @@ class EmployeeDetailDialog(QDialog):
                 try:
                     period_end = QDate(next_year, next_month, start_day - 1)
                 except:
-                    # If start_day-1 is 0, use last day of previous month
                     period_end = QDate(next_year, next_month, 1).addDays(-1)
                 if period_end > end:
                     break
@@ -712,7 +716,12 @@ class EmployeeDetailDialog(QDialog):
                 total_salary += salary
                 breakdown.append(f"{period_start.toString('dd.MM.yyyy')} - {period_end.toString('dd.MM.yyyy')}: {salary:.2f} TL ({period_start.daysTo(period_end) + 1} gün, tam maaş)")
                 # Next period starts the day after period_end
-                period_start = period_end.addDays(1)
+                new_period_start = period_end.addDays(1)
+                if new_period_start <= period_start:
+                    QMessageBox.critical(self, "Hak Ediş Hatası", "Dönem hesaplamasında hata oluştu. Lütfen tarihleri kontrol edin.")
+                    return
+                period_start = new_period_start
+                period_count += 1
             # 2. Last (possibly partial) period
             if period_start <= end:
                 days = period_start.daysTo(end) + 1
@@ -721,6 +730,8 @@ class EmployeeDetailDialog(QDialog):
                 periods.append((period_start, end, days, prorated))
                 total_salary += prorated
                 breakdown.append(f"{period_start.toString('dd.MM.yyyy')} - {end.toString('dd.MM.yyyy')}: {prorated:.2f} TL ({days} gün, 30 gün üzerinden)")
+            if period_count > 50:
+                breakdown.append("\nUYARI: Çok fazla dönem bulundu. Tarih girişinizi kontrol edin!")
             # 3. Subtract advances for all months up to and including termination date
             advances_total = 0
             advances_breakdown = []
