@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QDialog, QLabel, QLineEdit, QFormLayout, QDateEdit, QTabWidget, QHeaderView, QGroupBox,
     QTableView, QAbstractItemView, QTableWidgetSelectionRange, QSystemTrayIcon, QStyle, QMenu, QAction,
-    QMessageBox
+    QMessageBox, QInputDialog
 )
 from PyQt5.QtCore import Qt, QDate, QTimer
 from PyQt5.QtGui import QIcon
@@ -159,10 +159,9 @@ class Employee:
             for month in range(start_month, target_month):
                 advances = self.total_advances_for_month(month, current_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary
-                    days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
-                    proportion = (days_in_month - self.start_date.day() + 1) / days_in_month
-                    month_salary = self.get_salary_for_month(month, current_year) * proportion
+                    # For start month, use prorated salary (divide by 30)
+                    days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
+                    month_salary = self.get_salary_for_month(month, current_year) / 30 * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, current_year)
@@ -174,10 +173,9 @@ class Employee:
             for month in range(start_month, 13):
                 advances = self.total_advances_for_month(month, start_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary
-                    days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
-                    proportion = (days_in_month - self.start_date.day() + 1) / days_in_month
-                    month_salary = self.get_salary_for_month(month, start_year) * proportion
+                    # For start month, use prorated salary (divide by 30)
+                    days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
+                    month_salary = self.get_salary_for_month(month, start_year) / 30 * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, start_year)
@@ -200,10 +198,9 @@ class Employee:
         # Check if this is the actual start month (both month and year must match)
         if month == self.start_date.month() and year == self.start_date.year():
             # Sadece orantılı maaş hesapla, taşınan maaş eklenmesin
-            days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
-            proportion = (days_in_month - self.start_date.day() + 1) / days_in_month
+            days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
             current_salary = self.get_salary_for_month(month, year)
-            prorated_salary = current_salary * proportion
+            prorated_salary = current_salary / 30 * days_worked
             return prorated_salary - total_advance
 
         # Diğer aylarda tam maaş + taşınan maaş
@@ -673,7 +670,84 @@ class EmployeeDetailDialog(QDialog):
 
         # Hak ediş functionality
         def show_hak_edis():
-            QMessageBox.information(self, "Hak Ediş", "Hak Ediş hesaplama özelliği yakında eklenecek!")
+            # Ask for termination date
+            term_date, ok = QInputDialog.getText(self, "Hak Ediş", "Çıkış (işten ayrılma) tarihini girin (GG.AA.YYYY):")
+            if not ok or not term_date:
+                return
+            try:
+                term_date_q = QDate.fromString(term_date, "dd.MM.yyyy")
+                if not term_date_q.isValid() or term_date_q < self.employee.start_date:
+                    QMessageBox.warning(self, "Geçersiz Tarih", "Geçerli bir çıkış tarihi girin!")
+                    return
+            except Exception:
+                QMessageBox.warning(self, "Geçersiz Tarih", "Geçerli bir çıkış tarihi girin!")
+                return
+
+            start = self.employee.start_date
+            end = term_date_q
+            periods = []
+            period_start = QDate(start)
+            total_salary = 0
+            breakdown = []
+            start_day = start.day()
+            # 1. Full periods: from start_day to (start_day-1) of next month
+            while True:
+                # Calculate period_end
+                next_month = period_start.month() + 1
+                next_year = period_start.year()
+                if next_month > 12:
+                    next_month = 1
+                    next_year += 1
+                # The day before start_day in next month
+                try:
+                    period_end = QDate(next_year, next_month, start_day - 1)
+                except:
+                    # If start_day-1 is 0, use last day of previous month
+                    period_end = QDate(next_year, next_month, 1).addDays(-1)
+                if period_end > end:
+                    break
+                # Find salary for this period (use salary valid at period_start)
+                salary = self.employee.get_salary_for_month(period_start.month(), period_start.year())
+                periods.append((period_start, period_end, period_start.daysTo(period_end) + 1, salary))
+                total_salary += salary
+                breakdown.append(f"{period_start.toString('dd.MM.yyyy')} - {period_end.toString('dd.MM.yyyy')}: {salary:.2f} TL ({period_start.daysTo(period_end) + 1} gün, tam maaş)")
+                # Next period starts the day after period_end
+                period_start = period_end.addDays(1)
+            # 2. Last (possibly partial) period
+            if period_start <= end:
+                days = period_start.daysTo(end) + 1
+                salary = self.employee.get_salary_for_month(period_start.month(), period_start.year())
+                prorated = salary / 30 * days
+                periods.append((period_start, end, days, prorated))
+                total_salary += prorated
+                breakdown.append(f"{period_start.toString('dd.MM.yyyy')} - {end.toString('dd.MM.yyyy')}: {prorated:.2f} TL ({days} gün, 30 gün üzerinden)")
+            # 3. Subtract advances for all months up to and including termination date
+            advances_total = 0
+            advances_breakdown = []
+            current = QDate(start)
+            while current.year() < end.year() or (current.year() == end.year() and current.month() <= end.month()):
+                adv = self.employee.total_advances_for_month(current.month(), current.year())
+                advances_total += adv
+                if adv > 0:
+                    advances_breakdown.append(f"{current.month()}.{current.year()}: -{adv:.2f} TL avans")
+                # Move to next month
+                if current.month() == 12:
+                    current = QDate(current.year() + 1, 1, 1)
+                else:
+                    current = QDate(current.year(), current.month() + 1, 1)
+            net = total_salary - advances_total
+            # 4. Show breakdown
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Hak Ediş Hesaplama")
+            msg.setIcon(QMessageBox.Information)
+            msg.setText(f"Toplam Hak Ediş: {net:.2f} TL")
+            details = "\n".join(breakdown)
+            if advances_breakdown:
+                details += "\n\nAvanslar:\n" + "\n".join(advances_breakdown)
+            msg.setInformativeText(details)
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setDefaultButton(QMessageBox.Ok)
+            msg.exec_()
 
         hak_edis_btn.clicked.connect(show_hak_edis)
 
@@ -757,6 +831,7 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout()
 
         # Hotel Header
+        header_layout = QHBoxLayout()
         header_label = QLabel(f"🏨 {self.hotel_name}")
         header_label.setStyleSheet("""
             QLabel {
@@ -770,7 +845,15 @@ class MainWindow(QMainWindow):
             }
         """)
         header_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(header_label)
+        header_layout.addWidget(header_label)
+
+        # Dark mode toggle button
+        self.dark_mode = False
+        self.dark_mode_btn = QPushButton("🌙 Dark Mode")
+        self.dark_mode_btn.setCheckable(True)
+        self.dark_mode_btn.clicked.connect(self.toggle_dark_mode)
+        header_layout.addWidget(self.dark_mode_btn)
+        main_layout.addLayout(header_layout)
 
         # Subtitle
         subtitle_label = QLabel("Çalışan Maaş Takip Sistemi")
@@ -846,6 +929,31 @@ class MainWindow(QMainWindow):
         
         # Track last notification date to prevent duplicates
         self.last_notification_date = None
+
+    def toggle_dark_mode(self):
+        if not self.dark_mode:
+            # Apply dark stylesheet
+            dark_stylesheet = """
+                QWidget { background-color: #232629; color: #f0f0f0; }
+                QTableWidget, QTabWidget, QGroupBox, QDialog, QMenu, QHeaderView::section {
+                    background-color: #232629; color: #f0f0f0; border: 1px solid #444;
+                }
+                QPushButton { background-color: #444; color: #f0f0f0; border-radius: 4px; padding: 6px; }
+                QPushButton:checked, QPushButton:hover { background-color: #666; }
+                QLineEdit, QDateEdit, QComboBox, QSpinBox {
+                    background-color: #333; color: #f0f0f0; border: 1px solid #555;
+                }
+                QLabel { color: #f0f0f0; }
+                QMessageBox { background-color: #232629; color: #f0f0f0; }
+            """
+            QApplication.instance().setStyleSheet(dark_stylesheet)
+            self.dark_mode_btn.setText("☀️ Light Mode")
+            self.dark_mode = True
+        else:
+            # Reset to default
+            QApplication.instance().setStyleSheet("")
+            self.dark_mode_btn.setText("🌙 Dark Mode")
+            self.dark_mode = False
 
     def add_employee(self):
         dialog = AddEmployeeDialog(self)
