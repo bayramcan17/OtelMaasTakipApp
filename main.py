@@ -159,9 +159,10 @@ class Employee:
             for month in range(start_month, target_month):
                 advances = self.total_advances_for_month(month, current_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary (divide by 30)
-                    days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
-                    month_salary = self.get_salary_for_month(month, current_year) / 30 * days_worked
+                    # For start month, use prorated salary (divide by days in month)
+                    days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
+                    days_worked = days_in_month - self.start_date.day() + 1
+                    month_salary = self.get_salary_for_month(month, current_year) / days_in_month * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, current_year)
@@ -173,9 +174,10 @@ class Employee:
             for month in range(start_month, 13):
                 advances = self.total_advances_for_month(month, start_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary (divide by 30)
-                    days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
-                    month_salary = self.get_salary_for_month(month, start_year) / 30 * days_worked
+                    # For start month, use prorated salary (divide by days in month)
+                    days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
+                    days_worked = days_in_month - self.start_date.day() + 1
+                    month_salary = self.get_salary_for_month(month, start_year) / days_in_month * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, start_year)
@@ -197,11 +199,16 @@ class Employee:
 
         # Check if this is the actual start month (both month and year must match)
         if month == self.start_date.month() and year == self.start_date.year():
-            # Sadece orantılı maaş hesapla, taşınan maaş eklenmesin
-            days_worked = QDate(self.start_date.year(), month, 1).daysInMonth() - self.start_date.day() + 1
             current_salary = self.get_salary_for_month(month, year)
-            prorated_salary = current_salary / 30 * days_worked
-            return prorated_salary - total_advance
+            if self.start_date.day() == 1:
+                # Full salary for starting on the first day
+                return current_salary - total_advance
+            else:
+                # Prorated salary for starting later in the month
+                days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
+                days_worked = days_in_month - self.start_date.day() + 1
+                prorated_salary = current_salary / days_in_month * days_worked
+                return prorated_salary - total_advance
 
         # Diğer aylarda tam maaş + taşınan maaş
         current_salary = self.get_salary_for_month(month, year)
@@ -675,7 +682,9 @@ class EmployeeDetailDialog(QDialog):
             if not ok or not term_date:
                 return
             try:
-                term_date_q = QDate.fromString(term_date, "dd.MM.yyyy")
+                # Robust manual parsing to avoid QDate.fromString locale issues
+                day, month, year = map(int, term_date.split('.'))
+                term_date_q = QDate(year, month, day)
                 if not term_date_q.isValid() or term_date_q < self.employee.start_date:
                     QMessageBox.warning(self, "Geçersiz Tarih", "Geçerli bir çıkış tarihi girin!")
                     return
