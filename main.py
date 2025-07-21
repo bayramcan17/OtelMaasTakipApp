@@ -694,6 +694,7 @@ class EmployeeDetailDialog(QDialog):
 
             start = self.employee.start_date
             end = term_date_q
+            print(f"[DEBUG] start: {start.toString('yyyy-MM-dd')}, end: {end.toString('yyyy-MM-dd')}")
             periods = []
             period_start = QDate(start)
             total_salary = 0
@@ -713,10 +714,12 @@ class EmployeeDetailDialog(QDialog):
                     next_month = 1
                     next_year += 1
                 # The day before start_day in next month
-                try:
+                if start_day == 1:
+                    # Last day of the current month
+                    period_end = QDate(period_start.year(), period_start.month(), 1).addMonths(1).addDays(-1)
+                else:
                     period_end = QDate(next_year, next_month, start_day - 1)
-                except:
-                    period_end = QDate(next_year, next_month, 1).addDays(-1)
+                print(f"[DEBUG] period_start: {period_start.toString('yyyy-MM-dd')}, period_end: {period_end.toString('yyyy-MM-dd')}")
                 if period_end > end:
                     break
                 # Find salary for this period (use salary valid at period_start)
@@ -726,7 +729,9 @@ class EmployeeDetailDialog(QDialog):
                 breakdown.append(f"{period_start.toString('dd.MM.yyyy')} - {period_end.toString('dd.MM.yyyy')}: {salary:.2f} TL ({period_start.daysTo(period_end) + 1} gün, tam maaş)")
                 # Next period starts the day after period_end
                 new_period_start = period_end.addDays(1)
+                print(f"[DEBUG] new_period_start: {new_period_start.toString('yyyy-MM-dd')}")
                 if new_period_start <= period_start:
+                    print(f"[ERROR] new_period_start <= period_start! period_start: {period_start.toString('yyyy-MM-dd')}, new_period_start: {new_period_start.toString('yyyy-MM-dd')}")
                     QMessageBox.critical(self, "Hak Ediş Hatası", "Dönem hesaplamasında hata oluştu. Lütfen tarihleri kontrol edin.")
                     return
                 period_start = new_period_start
