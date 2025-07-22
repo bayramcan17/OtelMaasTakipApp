@@ -159,10 +159,10 @@ class Employee:
             for month in range(start_month, target_month):
                 advances = self.total_advances_for_month(month, current_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary (divide by days in month)
+                    # For start month, use prorated salary (divide by 30)
                     days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
                     days_worked = days_in_month - self.start_date.day() + 1
-                    month_salary = self.get_salary_for_month(month, current_year) / days_in_month * days_worked
+                    month_salary = self.get_salary_for_month(month, current_year) / 30 * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, current_year)
@@ -174,10 +174,10 @@ class Employee:
             for month in range(start_month, 13):
                 advances = self.total_advances_for_month(month, start_year)
                 if month == self.start_date.month():
-                    # For start month, use prorated salary (divide by days in month)
+                    # For start month, use prorated salary (divide by 30)
                     days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
                     days_worked = days_in_month - self.start_date.day() + 1
-                    month_salary = self.get_salary_for_month(month, start_year) / days_in_month * days_worked
+                    month_salary = self.get_salary_for_month(month, start_year) / 30 * days_worked
                 else:
                     # For other months, use full salary
                     month_salary = self.get_salary_for_month(month, start_year)
@@ -204,10 +204,10 @@ class Employee:
                 # Full salary for starting on the first day
                 return current_salary - total_advance
             else:
-                # Prorated salary for starting later in the month
+                # Prorated salary for starting later in the month (divide by 30)
                 days_in_month = QDate(self.start_date.year(), month, 1).daysInMonth()
                 days_worked = days_in_month - self.start_date.day() + 1
-                prorated_salary = current_salary / days_in_month * days_worked
+                prorated_salary = current_salary / 30 * days_worked
                 return prorated_salary - total_advance
 
         # Diğer aylarda tam maaş + taşınan maaş
